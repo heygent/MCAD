@@ -41,12 +41,11 @@ process Piero {
     }
 
     if(bomboloni_count == 0) {
-      settimer(100000);
-      if(events.peek_right() == TIMER_END) {
-        events.pop_right()
-      }
       V(bomboloni_request);
       P(bomboloni_full);
+      while(events.peek_right() == TIMER_END) {
+        events.pop_right()
+      }
     }
   }
 }
