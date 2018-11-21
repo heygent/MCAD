@@ -1,0 +1,55 @@
+#define NEW_CUSTOMER 0
+#define TIMER_END 1
+
+sem_t bomboloni_request = 0;
+sem_t bomboloni_full = 0;
+
+sem_t event_sem = 0;
+doubly_linked_list<int> events;
+
+int bomboloni_count = 0;
+
+process Mario {
+  loop {
+    P(bomboloni_request);
+    bomboloni_count = 30;
+    settimer(60)
+    V(bomboloni_full);
+  }
+}
+
+process Piero {
+  V(bomboloni_request);
+
+  loop {
+    P(event_sem);
+    int event = events.pop_right()
+
+    switch(event) {
+      case NEW_CUSTOMER:
+        bomboloni_count--;
+        <serve customer>
+        break;
+      case TIMER_END:
+        bomboloni_count = 0;
+        break;
+    }
+
+    if(bomboloni_count == 0) {
+      settimer(100000);
+      if(events.peek_right() == TIMER_END) {
+        events.pop_right()
+      }
+      V(bomboloni_request);
+      P(bomboloni_full);
+    }
+  }
+}
+
+process Rosa {
+  loop {
+    waittimer();
+    events.push_right(TIMER_END)
+  }
+}
+

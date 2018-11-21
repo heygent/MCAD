@@ -1,0 +1,60 @@
+signal _;
+
+process Mario {
+  port signal bomboloni_request_p;
+
+  do
+    receive(_) from bomboloni_request_p; -> {
+      <make bomboloni>
+      send(30) to Piero.reset_bomboloni_p;
+    }
+  od
+  
+}
+
+process Piero {
+  int bomboloni_count = 0;
+  port int reset_bomboloni_p;
+
+  send(_) to Mario.bomboloni_request_p;
+
+  do
+    (bomboloni_count > 0); receive(<request>) from <some_customer>; -> {
+      <serve customer>
+      bomboloni_count--;
+
+      if(bomboloni_count == 0) {
+        send(_) to Mario.bomboloni_request_p;
+      }
+    }
+    receive(bomboloni_count) from reset_bomboloni_p; -> {
+
+      if(bomboloni_count == 0) {
+        send(_) to Mario.bomboloni_request_p;
+      }
+
+    }
+  od
+}
+
+process Rosa {
+  port signal new_batch_p;
+  port signal timer_over_p;
+
+  do
+    receive(_) from new_batch_p; -> {
+      settimer(60);
+    }
+    receive(_) from timer_over_p; -> {
+      send(0) to Piero.reset_bomboloni_p;
+    }
+  od
+  
+}
+
+process RosaTimerWaiter {
+  while(true) {
+    waittimer();
+    send(_) to Rosa.timer_over_p;
+  }
+}
