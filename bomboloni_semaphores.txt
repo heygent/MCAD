@@ -21,6 +21,7 @@ process Mario {
 
 process Piero {
   V(bomboloni_request);
+  P(bomboloni_full);
 
   loop {
     P(events_sem);
