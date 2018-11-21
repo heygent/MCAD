@@ -4,7 +4,8 @@
 sem_t bomboloni_request = 0;
 sem_t bomboloni_full = 0;
 
-sem_t event_sem = 0;
+sem_t events_sem = 0;
+sem_t events_mutex = 1;
 doubly_linked_list<int> events;
 
 int bomboloni_count = 0;
@@ -22,8 +23,11 @@ process Piero {
   V(bomboloni_request);
 
   loop {
-    P(event_sem);
+    P(events_sem);
+
+    P(events_mutex);
     int event = events.pop_right()
+    V(events_mutex);
 
     switch(event) {
       case NEW_CUSTOMER:
@@ -49,7 +53,10 @@ process Piero {
 process Rosa {
   loop {
     waittimer();
-    events.push_right(TIMER_END)
+    P(events_mutex);
+    events.push_right(TIMER_END);
+    V(events_mutex);
+    V(events_sem);
   }
 }
 
