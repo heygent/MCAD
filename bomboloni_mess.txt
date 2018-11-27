@@ -1,0 +1,187 @@
+// tanto per non ridichiararlo ovunque, anche se per il resto non si suppone
+// memoria condivisa
+signal _;
+
+#define TIMER_OVER 0
+#define NEW_BOMBOLONI 1
+#define NEW_CUSTOMER 2
+
+typedef struct { int type; process sender } message_t;
+
+
+/**
+  Questo processo si occupa di ricevere i messaggi per conto di Piero, 
+  e riordinarli in modo che i messaggi più urgenti o utili vengano ricevuti
+  prima.
+  Piero può puoi richiedere di prelevare il primo messaggio dalla coda in
+  ordine di priorità, con la possibilità di scegliere se richiedere un
+  messaggio tra tutti o solo da quelli di servizio di Rosa e Piero (utile
+  quando Piero ha finito i bomboloni e non può gestire messaggi relativi ai
+  nuovi clienti).
+*/
+process PieroMessageQueue {
+
+  // tutti i messaggi, dai clienti e di servizio, vengono ricevuti qui.
+  port int enqueue_p;
+  int message_type;
+
+  // porta per richiedere il prossimo messaggio tra tutti i messaggi
+  port signal deque_message_p;
+
+  // porta per richiedere il prossimo messaggio tra i soli messaggi di servizio
+  port signal deque_meta_p;
+
+  // code dei messaggi dei clienti e di servizio.
+  doubly_linked_list<message_t> customer_messages;
+  doubly_linked_list<message_t> meta_messages;
+  
+  do
+    [] p=receive(message_type) from enqueue_p -> {
+
+      message_t message = {
+        .type = message_type,
+        .sender = p
+      }
+
+      switch(message_type) {
+        case TIMER_OVER:
+          // i messaggi di timer scaduto vanno in testa alla coda per assegnare
+          // loro priorità massima.
+          meta_messages.push_head(message);
+          break;
+
+        case NEW_BOMBOLONI:
+          meta_messages.push_tail(message)
+          break;
+
+        case NEW_CUSTOMER:
+          customer_messages.push_tail(message);
+          break;
+      }
+    }
+
+    (meta_messages.size() + customer_messages.size() > 0);
+      p=receive(_) from dequeue_message_p -> {
+        message_t to_send;
+
+        if(meta_messages.size() > 0) {
+          to_send = meta_messages.pop_head();
+        }
+        else {
+          to_send = customer_messages.pop_head();
+        }
+
+        send(to_send) to p.deque_return_p;
+      }
+
+    (meta_messages.size() > 0); p=receive(_) from deque_meta_p -> {
+      send(meta_messages.pop_head()) to p.deque_return_p;
+    }
+  od
+}
+
+process Piero {
+  int bomboloni_count = 0;
+
+  port message_t deque_return_p;
+  message_t message;
+
+  while(true) {
+
+    if(bomboloni_count == 0) {
+      send(_) to Mario.bomboloni_request_p;
+
+      // per non far ripetere la richiesta a Mario fin quando non si ricevono
+      // nuovi bomboloni
+      bomboloni_count = -1;
+    }
+
+    if(bomboloni_count > 0) {
+      send(_) to PieroMessageQueue.deque_message_p;
+    }
+    else {
+      // se non ho bomboloni, richiedo solo i messaggi non relativi ai clienti
+      send(_) to PieroMessageQueue.deque_meta_p;
+    }
+
+    p=receive(message) from deque_return_p;
+
+    switch(message.type) {
+
+      case TIMER_OVER:
+        // I messaggi di timer scaduto vengono ignorati se i bomboloni sono
+        // già terminati. Inoltre, i messaggi di timer scaduto vengono
+        // riordinati per essere ricevuti sempre prima di quelli riguardanti
+        // nuovi bomboloni, per cui eventuali timer non validi vengono ricevuti
+        // quando i bomboloni sono già terminati, e quindi ignorati.
+        // Questo è garantito anche dal fatto che Rosa fa scadere sempre il
+        // timer precedente quando ne viene richiesto uno nuovo, e dal fatto
+        // che Mario attende che Rosa finisca quest'operazione prima di mandare
+        // i nuovi bomboloni.
+
+        if(bomboloni_count > 0) {
+          <throw bomboloni>
+          bomboloni_count = 0;
+        }
+        break;
+
+      case NEW_CUSTOMER:
+        <serve message.sender>
+        bomboloni_count--;
+        break;
+
+      case NEW_BOMBOLONI:
+        bomboloni_count = 30;
+        break;
+    }
+
+  }
+
+}
+
+process Mario {
+  port signal bomboloni_request_p;
+  port signal start_timer_ack_p;
+
+  while(true) {
+    p=receive(_) from bomboloni_request_p;
+    <make bomboloni>
+    send(_) to Rosa.start_timer_p;
+    p=receive(_) from start_timer_ack_p;
+    send(NEW_BOMBOLONI) to PieroMessageQueue.enqueue_p;
+  }
+}
+
+process Rosa {
+  port signal start_timer_p;
+  port signal _timer_end_p;
+
+  do
+    [] p=receive(_) from start_timer_p -> {
+
+      // la semantica di settimer(0) viene interpretata nel seguente modo:
+      // crea un nuovo timer che scatta subito (dimenticando l'eventuale timer
+      // precente)
+
+      settimer(0);
+      p=receive(_) from _timer_end_p;
+
+      // da questo punto in poi, eventuali messaggi riferiti alla scadenza del
+      // precedente timer sono stati inviati.
+
+      settimer(60);
+      send(_) to p.start_timer_ack_p;
+    }
+
+    [] p=receive(_) from _timer_end_p -> {
+      send(TIMER_OVER) to PieroMessageQueue.enqueue_p;
+    }
+  od
+}
+
+process TimerWaiter {
+  while(true) {
+    waittimer()
+    send(_) to Rosa._timer_end_p;
+  }
+}
